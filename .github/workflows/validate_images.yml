@@ -131,9 +131,9 @@ jobs:
               const lines = failures.map((failure) => {
                 const rp = failure.repoPath;
                 if (failure.reason === 'missingRawQuery') {
-                  return ` - ${failure.filePath}:${failure.line}: ${failure.url} (agregar ?raw=true)`;
+                  return `${failure.filePath} line ${failure.line}: add ?raw=true to ${failure.url}`;
                 }
-                return ` - ${failure.filePath}:${failure.line}: ${failure.url} -> falta ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
+                return `${failure.filePath} line ${failure.line}: missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
               });
               core.setFailed(`Invalid OrcaSlicer image references:\n${lines.join('\n')}`);
               return;
