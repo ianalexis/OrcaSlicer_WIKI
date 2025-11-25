@@ -13,12 +13,11 @@ on:
       - '**/*.htm'
 
 jobs:
-  image-link-validation:
+  images-check:
+    name: images check
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      ERROR_BLOCK: ''
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -172,23 +171,22 @@ jobs:
               const lines = failures.map((failure) => {
                 const rp = failure.repoPath;
                 if (failure.reason === 'missingRawQuery') {
-                  return `${failure.filePath} line ${failure.line}: add ?raw=true to ${failure.url}`;
+                  return `  • ${failure.filePath}:${failure.line} - add ?raw=true to ${failure.url}`;
                 }
                 if (failure.reason === 'altMismatch') {
-                  return `${failure.filePath} line ${failure.line}: alt text must be "${failure.expectedAlt}" but was "${failure.actualAlt}"`;
+                  return `  • ${failure.filePath}:${failure.line} - alt text must be "${failure.expectedAlt}" but was "${failure.actualAlt}"`;
                 }
                 if (failure.reason === 'altOrder') {
-                  return `${failure.filePath} line ${failure.line}: alt attribute must appear before src for ${failure.url}`;
+                  return `  • ${failure.filePath}:${failure.line} - alt attribute must appear before src for ${failure.url}`;
                 }
-                return `${failure.filePath} line ${failure.line}: missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
+                return `  • ${failure.filePath}:${failure.line} - missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
               });
-              const block = lines.join('\n');
-              core.exportVariable('ERROR_BLOCK', block);
+              const errorMessage = `Invalid OrcaSlicer image references (${failures.length} error${failures.length > 1 ? 's' : ''}):\n${lines.join('\n')}`;
+              core.setFailed(errorMessage);
               return;
             }
 
-            core.exportVariable('ERROR_BLOCK', '');
-            core.info(`Validated ${references.length} OrcaSlicer image link(s). All exist.`);
+            core.info(`✓ Validated ${references.length} OrcaSlicer image link(s). All exist.`);
 
             function lineFromIndex(text, index) {
               let line = 1;
@@ -310,10 +308,3 @@ jobs:
               const body = await response.text();
               throw new Error(`GitHub API ${response.status} for ${url}: ${body}`);
             }
-
-      - name: Show invalid image references
-        if: env.ERROR_BLOCK != ''
-        run: |
-          echo 'Invalid OrcaSlicer image references:'
-          printf "\`\`\`\n%s\n\`\`\`\n" "${{ env.ERROR_BLOCK }}"
-          exit 1
