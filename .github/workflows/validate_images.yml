@@ -24,6 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Validate OrcaSlicer image references
+        id: validate_images
         uses: actions/github-script@v7
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -179,7 +180,9 @@ jobs:
                 }
                 return `${failure.filePath} line ${failure.line}: missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
               });
-              core.setFailed(`Invalid OrcaSlicer image references:\n${lines.join('\n')}`);
+              const block = lines.join('\n');
+              core.setOutput('error_block', block);
+              core.setFailed('Invalid OrcaSlicer image references. See the formatted list step for details.');
               return;
             }
 
@@ -305,3 +308,9 @@ jobs:
               const body = await response.text();
               throw new Error(`GitHub API ${response.status} for ${url}: ${body}`);
             }
+
+      - name: Show invalid image references
+        if: failure() && steps.validate_images.outputs.error_block != ''
+        run: |
+          echo 'Invalid OrcaSlicer image references:'
+          printf "\`\`\`\n%s\n\`\`\`\n" "${{ steps.validate_images.outputs.error_block }}"
