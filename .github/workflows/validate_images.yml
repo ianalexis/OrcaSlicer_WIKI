@@ -72,8 +72,8 @@ jobs:
               return;
             }
 
-            const markdownImagePattern = /!\[[^\]]*\]\(\s*(?<url>[^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
-            const htmlImagePattern = /<img[^>]+src=(?:"([^"]+)"|'([^']+)')/gi;
+            const markdownImagePattern = /!\[(?<alt>[^\]]*)\]\(\s*(?<url>[^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
+            const htmlImagePattern = /<img\b[^>]*>/gi;
 
             const references = [];
 
@@ -81,28 +81,56 @@ jobs:
               const absolutePath = path.join(workspace, relativePath);
               const text = fs.readFileSync(absolutePath, 'utf8');
 
-              const addReference = (url, index) => {
+              const addReference = (url, index, altText = '', options = {}) => {
                 const line = lineFromIndex(text, index);
                 const repoPath = parseOrcaLink(url);
                 if (repoPath) {
-                  references.push({ filePath: relativePath, line, url, repoPath });
+                  references.push({
+                    filePath: relativePath,
+                    line,
+                    url,
+                    repoPath,
+                    altText: altText.trim(),
+                    isHtml: Boolean(options.isHtml),
+                    altBeforeSrc: options.altBeforeSrc !== false,
+                  });
                 }
               };
 
               markdownImagePattern.lastIndex = 0;
               let match;
               while ((match = markdownImagePattern.exec(text)) !== null) {
-                const url = match.groups ? match.groups.url : match[1];
+                const url = match.groups ? match.groups.url : match[2];
                 if (url) {
-                  addReference(url.trim(), match.index);
+                  const alt = match.groups ? match.groups.alt : match[1];
+                  addReference(url.trim(), match.index, (alt || '').trim());
                 }
               }
 
               htmlImagePattern.lastIndex = 0;
               while ((match = htmlImagePattern.exec(text)) !== null) {
-                const url = match[1] || match[2];
+                const tag = match[0];
+                const attrs = {};
+                const attrPattern = /([a-zA-Z_:][\w:.-]*)\s*=\s*("([^"]*)"|'([^']*)')/g;
+                const attrOrder = [];
+                let attrMatch;
+                while ((attrMatch = attrPattern.exec(tag)) !== null) {
+                  const name = attrMatch[1].toLowerCase();
+                  const value = attrMatch[3] !== undefined ? attrMatch[3] : attrMatch[4] || '';
+                  attrs[name] = value;
+                  attrOrder.push({ name, index: attrMatch.index });
+                }
+                const url = attrs.src;
                 if (url) {
-                  addReference(url.trim(), match.index);
+                  const altEntry = attrOrder.find((entry) => entry.name === 'alt');
+                  const srcEntry = attrOrder.find((entry) => entry.name === 'src');
+                  const altBeforeSrc = srcEntry && altEntry ? altEntry.index < srcEntry.index : true;
+                  addReference(
+                    url.trim(),
+                    match.index,
+                    (attrs.alt || '').trim(),
+                    { isHtml: true, altBeforeSrc }
+                  );
                 }
               }
             }
@@ -120,6 +148,16 @@ jobs:
                 failures.push({ ...reference, reason: 'missingRawQuery' });
                 continue;
               }
+              if (reference.isHtml && reference.altText && !reference.altBeforeSrc) {
+                failures.push({ ...reference, reason: 'altOrder' });
+                continue;
+              }
+              const expectedAlt = expectedAltFromRepoPath(reference.repoPath);
+              const actualAlt = reference.altText || '';
+              if (expectedAlt && actualAlt !== expectedAlt) {
+                failures.push({ ...reference, reason: 'altMismatch', expectedAlt, actualAlt });
+                continue;
+              }
               // eslint-disable-next-line no-await-in-loop
               const exists = await repoPathExists(reference.repoPath, currentRepo, workspace, cache);
               if (!exists) {
@@ -132,6 +170,12 @@ jobs:
                 const rp = failure.repoPath;
                 if (failure.reason === 'missingRawQuery') {
                   return `${failure.filePath} line ${failure.line}: add ?raw=true to ${failure.url}`;
+                }
+                if (failure.reason === 'altMismatch') {
+                  return `${failure.filePath} line ${failure.line}: alt text must be "${failure.expectedAlt}" but was "${failure.actualAlt}"`;
+                }
+                if (failure.reason === 'altOrder') {
+                  return `${failure.filePath} line ${failure.line}: alt attribute must appear before src for ${failure.url}`;
                 }
                 return `${failure.filePath} line ${failure.line}: missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
               });
@@ -201,6 +245,18 @@ jobs:
               }
 
               return null;
+            }
+
+            function expectedAltFromRepoPath(repoPath) {
+              const baseName = path.basename(repoPath.path || '');
+              if (!baseName) {
+                return '';
+              }
+              const dotIndex = baseName.lastIndexOf('.');
+              if (dotIndex <= 0) {
+                return baseName;
+              }
+              return baseName.slice(0, dotIndex);
             }
 
             async function repoPathExists(repoPath, currentRepoName, root, cacheMap) {
