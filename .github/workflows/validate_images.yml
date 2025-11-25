@@ -1,0 +1,217 @@
+name: Validate Images
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'images/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    name: Check Images
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          files: |
+            **/*.md
+            images/**
+
+      - name: Validate image references
+        if: steps.changed-files.outputs.any_changed == 'true'
+        shell: pwsh
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+        run: |
+          Set-StrictMode -Version Latest
+
+          $repoRoot = Get-Location
+          $rawSuffix = '?raw=true'
+          $wikiPrefix = 'https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/'
+          $mainRepoPrefix = 'https://github.com/OrcaSlicer/OrcaSlicer/blob/main/'
+
+          $changedFiles = @()
+          if ($env:CHANGED_FILES) {
+              $changedFiles = $env:CHANGED_FILES -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          }
+
+          $markdownFiles = $changedFiles | Where-Object { $_.ToLower().EndsWith('.md') }
+
+          if (-not $markdownFiles) {
+              Write-Host '::notice::No Markdown files changed. Skipping image validation.'
+              exit 0
+          }
+
+          $brokenImages = @()
+
+          function Add-Issue {
+              param(
+                  [string]$SourceFile,
+                  [int]$Line,
+                  [string]$Issue
+              )
+
+              $script:brokenImages += [pscustomobject]@{
+                  SourceFile = $SourceFile
+                  Line       = $Line
+                  Issue      = $Issue
+              }
+          }
+
+          function Get-ImagesFromLine {
+              param([string]$Line)
+
+              $images = @()
+              $lineForParsing = [regex]::Replace($Line, '`[^`]*`', '')
+
+              $imagePatterns = @(
+                  @{ Pattern = '!\[([^\]]*)\]\(([^)]+)\)'; Type = 'Markdown'; AltGroup = 1; UrlGroup = 2 },
+                  @{ Pattern = '<img\s+[^>]*>'; Type = 'HTML'; AltGroup = -1; UrlGroup = -1 }
+              )
+
+              foreach ($pattern in $imagePatterns) {
+                  foreach ($match in [regex]::Matches($lineForParsing, $pattern.Pattern)) {
+                      $altText = ''
+                      $url = ''
+
+                      if ($pattern.Type -eq 'Markdown') {
+                          $altText = $match.Groups[$pattern.AltGroup].Value
+                          $url = $match.Groups[$pattern.UrlGroup].Value
+                      }
+                      else {
+                          $imgTag = $match.Value
+                          if ($imgTag -match "(?i)alt\s*=\s*[`"']([^`"']*)[`"']") { $altText = $matches[1] }
+                          if ($imgTag -match "(?i)src\s*=\s*[`"']([^`"']*)[`"']") { $url = $matches[1] }
+                      }
+
+                      $images += [pscustomobject]@{
+                          Match      = $match.Value
+                          Type       = $pattern.Type
+                          AltText    = $altText
+                          Url        = $url
+                          StartIndex = $match.Index
+                          Length     = $match.Length
+                      }
+                  }
+              }
+
+              return $images
+          }
+
+          foreach ($relativeFile in $markdownFiles) {
+              $normalizedRelPath = $relativeFile -replace '\\', '/'
+              $nativeRelativePath = $relativeFile -replace '/', [System.IO.Path]::DirectorySeparatorChar
+              $fullPath = Join-Path $repoRoot $nativeRelativePath
+
+              if (-not (Test-Path $fullPath)) {
+                  Write-Host "::warning::File not found (likely deleted): $relativeFile"
+                  continue
+              }
+
+              $lines = Get-Content -Path $fullPath -Encoding UTF8
+              $inCodeFence = $false
+
+              for ($lineNumber = 0; $lineNumber -lt $lines.Count; $lineNumber++) {
+                  $line = $lines[$lineNumber]
+                  if ($line.TrimStart() -match '^(```|~~~)') {
+                      $inCodeFence = -not $inCodeFence
+                      continue
+                  }
+                  if ($inCodeFence) { continue }
+
+                  $imagesInLine = Get-ImagesFromLine $line
+
+                  foreach ($image in $imagesInLine) {
+                      $altText = ''
+                      $url = ''
+
+                      if ($null -ne $image.AltText) { $altText = $image.AltText.Trim() }
+                      if ($null -ne $image.Url) { $url = $image.Url.Trim() }
+
+                      if (-not $altText) {
+                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Missing alt text for image reference"
+                          continue
+                      }
+
+                      if (-not $url) {
+                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Missing URL for image reference"
+                          continue
+                      }
+
+                      $hasAllowedPrefix = $url.StartsWith($wikiPrefix) -or $url.StartsWith($mainRepoPrefix)
+                      $urlIssues = @()
+
+                      if (-not $hasAllowedPrefix) {
+                          $urlIssues += 'URL must point to the OrcaSlicer GitHub repositories'
+                      }
+
+                      if (-not $url.EndsWith($rawSuffix)) {
+                          $urlIssues += "URL must end with '$rawSuffix'"
+                      }
+
+                      if ($url -match '^https?://(?!github\.com/OrcaSlicer/)') {
+                          $urlIssues += 'External image hosts are not allowed'
+                      }
+
+                      if ($urlIssues.Count -gt 0) {
+                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] URL format issues: $([string]::Join('; ', $urlIssues))"
+                          continue
+                      }
+
+                      $prefixInUse = $url.StartsWith($wikiPrefix) ? $wikiPrefix : $mainRepoPrefix
+                      $relativeSegment = $url.Substring($prefixInUse.Length)
+                      $pathWithoutQuery = $relativeSegment.Substring(0, $relativeSegment.Length - $rawSuffix.Length)
+                      $altMatchesFile = $false
+
+                      if ($prefixInUse -eq $wikiPrefix) {
+                          $nativeImagePath = $pathWithoutQuery -replace '/', [System.IO.Path]::DirectorySeparatorChar
+                          $expectedImagePath = Join-Path $repoRoot $nativeImagePath
+
+                          if (-not (Test-Path $expectedImagePath)) {
+                              Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Image not found at path: $pathWithoutQuery"
+                              continue
+                          }
+
+                          $fileNameFromUrl = [System.IO.Path]::GetFileNameWithoutExtension($expectedImagePath)
+                          if ([string]::Equals($altText, $fileNameFromUrl, [System.StringComparison]::OrdinalIgnoreCase)) {
+                              $altMatchesFile = $true
+                          }
+                      }
+                      else {
+                          $fileNameFromUrl = [System.IO.Path]::GetFileNameWithoutExtension($pathWithoutQuery)
+                          if ([string]::Equals($altText, $fileNameFromUrl, [System.StringComparison]::OrdinalIgnoreCase)) {
+                              $altMatchesFile = $true
+                          }
+                      }
+
+                      if (-not $altMatchesFile) {
+                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Alt text '$altText' must match file name"
+                      }
+                  }
+              }
+          }
+
+          if ($brokenImages.Count -gt 0) {
+              Write-Host '::error::Image validation failed'
+              $brokenImages | Sort-Object SourceFile, Line | ForEach-Object {
+                  Write-Host "::error file=$($_.SourceFile),line=$($_.Line)::$($_.Issue)"
+              }
+              exit 1
+          }
+
+          Write-Host '::notice::All image references look good.'
+
