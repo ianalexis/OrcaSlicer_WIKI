@@ -29,7 +29,7 @@ This test will be set detect automatically your printer firmware type and will a
       2. Speed high enough to trigger ringing (e.g., 100 mm/s).
    3. Use an opaque, high-gloss filament to make ringing more visible.
 2. Open the Cornering test.  
-   ![jd_first_menu](https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/JunctionDeviation/jd_first_menu.png?raw=true)
+   ![jd_first_menu](https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/JunctionDeviation/jd_first_menu.png?raw=rue)
    1. In this first approximation, set a wide range of Start and End values.
       - If you don't see any loss of quality, increase the End value and retry.
       - If you do see a loss of quality, measure the maximum height when the corners start losing sharpness and read the Cornering/Jerk/JunctionDeviation value set at that point in OrcaSlicer.  
