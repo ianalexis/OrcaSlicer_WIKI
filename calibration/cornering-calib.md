@@ -34,7 +34,7 @@ This test will be set detect automatically your printer firmware type and will a
       - If you don't see any loss of quality, increase the End value and retry.
       - If you do see a loss of quality, measure the maximum height when the corners start losing sharpness and read the Cornering/Jerk/JunctionDeviation value set at that point in OrcaSlicer.  
       ![jd_first_print_measure](https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/JunctionDeviation/jd_first_print_measure.jpg?raw=true)  
-      ![jd_first_slicer_measure](https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/JunctionDeviation/jd_first_slicer_measure.png?raw=true)
+      ![jd_first_slicr_measure](https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/JunctionDeviation/jd_first_slicer_measure.png?raw=true)
    2. Print a new calibration tower with a maximum set near the point where corners start losing sharpness.  
       **RECOMMENDED:** Use the *Ringing Tower* test model to more easily visualize the jerk limit.
    3. Print the second Cornering test with the new maximum value.  
