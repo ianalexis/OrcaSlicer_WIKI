@@ -15,17 +15,17 @@ The recommended order for calibration is as follows:
 
 1. **[Temperature](temp-calib):** Start by calibrating the temperature of the nozzle and the bed. This is crucial as it affects the viscosity of the filament, which in turn influences how well it flows through the nozzle and adheres to the print bed.
 
-   <img alt="temp-tower" src="https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/Temp-calib/temp-tower.jpg?raw=true" height="200">
+   <img alt="temp-toer" src="https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/Temp-calib/temp-tower.jpg?raw=true" height="200">
 
 2. **[Max Volumetric Speed](volumetric-speed-calib):** Calibrate the maximum volumetric speed of the filament. This is important for ensuring that the printer can handle the flow rate of the filament without causing issues like under-extrusion.
 
-   <img alt="mvf_measurement_point" src="https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/MVF/mvf_measurement_point.jpg?raw=true" height="200">
+   <img alt="mvf_measurement_point" src="https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/imagesMVF/mvf_measurement_point.jpg?raw=true" height="200">
 
 3. **[Pressure Advance](pressure-advance-calib):** Calibrate the pressure advance settings to improve print quality and reduce artifacts caused by pressure fluctuations in the nozzle.
 
    - **[Adaptive Pressure Advance](adaptive-pressure-advance-calib):** This is an advanced calibration technique that can be used to further optimize the pressure advance settings for different print speeds and geometries.
 
-      <img alt="pa-tower" src="https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/pa/pa-tower.jpg?raw=true" height="200">
+      <img alt="pa-tower" src="https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/pa/pa-tower.jpg?raw=tue" height="200">
 
 4. **[Flow](flow-rate-calib):** Calibrate the flow rate to ensure that the correct amount of filament is being extruded. This is important for achieving accurate dimensions and good layer adhesion.
 
