@@ -116,10 +116,14 @@ jobs:
 
             const failures = [];
             for (const reference of references) {
+              if (reference.repoPath.needsRawQuery && !reference.repoPath.hasRawQuery) {
+                failures.push({ ...reference, reason: 'missingRawQuery' });
+                continue;
+              }
               // eslint-disable-next-line no-await-in-loop
               const exists = await repoPathExists(reference.repoPath, currentRepo, workspace, cache);
               if (!exists) {
-                failures.push(reference);
+                failures.push({ ...reference, reason: 'missingFile' });
               }
             }
 
@@ -127,7 +131,9 @@ jobs:
               let message = '\nInvalid OrcaSlicer image references detected:';
               for (const failure of failures) {
                 const rp = failure.repoPath;
-                const lineMsg = `${failure.filePath}:${failure.line}: ${failure.url} -> missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
+                const lineMsg = failure.reason === 'missingRawQuery'
+                  ? `${failure.filePath}:${failure.line}: ${failure.url} -> missing required ?raw=true query parameter`
+                  : `${failure.filePath}:${failure.line}: ${failure.url} -> missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
                 core.error(lineMsg);
                 message += `\n - ${lineMsg}`;
               }
@@ -181,7 +187,9 @@ jobs:
                   return null;
                 }
                 const relPath = decodeURIComponent(parts.slice(4).join('/'));
-                return { repo, ref, path: relPath };
+                const rawParam = parsed.searchParams.get('raw');
+                const hasRawQuery = typeof rawParam === 'string' && rawParam.toLowerCase() === 'true';
+                return { repo, ref, path: relPath, needsRawQuery: true, hasRawQuery };
               }
 
               if (hostname === 'raw.githubusercontent.com') {
@@ -191,7 +199,7 @@ jobs:
                 const repo = parts[1];
                 const ref = decodeURIComponent(parts[2]);
                 const relPath = decodeURIComponent(parts.slice(3).join('/'));
-                return { repo, ref, path: relPath };
+                return { repo, ref, path: relPath, needsRawQuery: false, hasRawQuery: true };
               }
 
               return null;
