@@ -314,3 +314,4 @@ jobs:
         run: |
           echo 'Invalid OrcaSlicer image references:'
           printf "\`\`\`\n%s\n\`\`\`\n" "${{ steps.validate_images.outputs.error_block }}"
+          exit 1
