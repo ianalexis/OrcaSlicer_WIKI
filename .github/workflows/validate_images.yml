@@ -181,8 +181,10 @@ jobs:
                 }
                 return `  • ${failure.filePath}:${failure.line} - missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
               });
-              const errorMessage = `Invalid OrcaSlicer image references (${failures.length} error${failures.length > 1 ? 's' : ''}):\n${lines.join('\n')}`;
-              core.setFailed(errorMessage);
+              const errorBlock = lines.join('\n');
+              core.setOutput('error_block', errorBlock);
+              core.setOutput('error_count', failures.length);
+              core.setFailed(`Found ${failures.length} invalid image reference${failures.length > 1 ? 's' : ''}`);
               return;
             }
 
@@ -308,3 +310,10 @@ jobs:
               const body = await response.text();
               throw new Error(`GitHub API ${response.status} for ${url}: ${body}`);
             }
+
+      - name: Display Image Validation Errors
+        if: failure() && steps.validate_images.outputs.error_block
+        run: |
+          echo "Invalid OrcaSlicer image references (${{ steps.validate_images.outputs.error_count }} error(s)):"
+          echo ""
+          echo "${{ steps.validate_images.outputs.error_block }}"
