@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      ERROR_BLOCK: ''
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -181,11 +183,11 @@ jobs:
                 return `${failure.filePath} line ${failure.line}: missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
               });
               const block = lines.join('\n');
-              core.setOutput('error_block', block);
-              core.setFailed('Invalid OrcaSlicer image references. See the formatted list step for details.');
+              core.exportVariable('ERROR_BLOCK', block);
               return;
             }
 
+            core.exportVariable('ERROR_BLOCK', '');
             core.info(`Validated ${references.length} OrcaSlicer image link(s). All exist.`);
 
             function lineFromIndex(text, index) {
@@ -310,8 +312,8 @@ jobs:
             }
 
       - name: Show invalid image references
-        if: failure() && steps.validate_images.outputs.error_block != ''
+        if: env.ERROR_BLOCK != ''
         run: |
           echo 'Invalid OrcaSlicer image references:'
-          printf "\`\`\`\n%s\n\`\`\`\n" "${{ steps.validate_images.outputs.error_block }}"
+          printf "\`\`\`\n%s\n\`\`\`\n" "${{ env.ERROR_BLOCK }}"
           exit 1
