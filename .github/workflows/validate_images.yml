@@ -127,7 +127,9 @@ jobs:
               let message = '\nInvalid OrcaSlicer image references detected:';
               for (const failure of failures) {
                 const rp = failure.repoPath;
-                message += `\n - ${failure.filePath}:${failure.line}: ${failure.url} -> missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
+                const lineMsg = `${failure.filePath}:${failure.line}: ${failure.url} -> missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
+                core.error(lineMsg);
+                message += `\n - ${lineMsg}`;
               }
               core.setFailed(message);
               return;
