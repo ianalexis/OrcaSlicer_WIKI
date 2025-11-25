@@ -1,217 +1,243 @@
-name: Validate Images
+name: Validate OrcaSlicer Images
 
 on:
   pull_request:
     paths:
       - '**/*.md'
-      - 'images/**'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
+      - '**/*.markdown'
+      - '**/*.mdown'
+      - '**/*.mkd'
+      - '**/*.mkdn'
+      - '**/*.mdx'
+      - '**/*.html'
+      - '**/*.htm'
 
 jobs:
-  validate:
-    runs-on: windows-latest
-    name: Check Images
-
+  image-link-validation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@v47
-        with:
-          files: |
-            **/*.md
-            images/**
-
-      - name: Validate image references
-        if: steps.changed-files.outputs.any_changed == 'true'
-        shell: pwsh
+      - name: Validate OrcaSlicer image references
+        uses: actions/github-script@v7
         env:
-          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
-        run: |
-          Set-StrictMode -Version Latest
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
 
-          $repoRoot = Get-Location
-          $rawSuffix = '?raw=true'
-          $wikiPrefix = 'https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/'
-          $mainRepoPrefix = 'https://github.com/OrcaSlicer/OrcaSlicer/blob/main/'
+            const OWNER = 'OrcaSlicer';
+            const ownerLower = OWNER.toLowerCase();
+            const currentRepo = context.repo.repo;
+            const workspace = process.cwd();
+            const allowedExt = new Set(['.md', '.markdown', '.mdown', '.mkd', '.mkdn', '.mdx', '.html', '.htm']);
 
-          $changedFiles = @()
-          if ($env:CHANGED_FILES) {
-              $changedFiles = $env:CHANGED_FILES -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-          }
+            const baseSha = process.env.BASE_SHA;
+            const headSha = process.env.HEAD_SHA;
+            if (!baseSha || !headSha) {
+              core.setFailed('Missing base/head commit SHAs.');
+              return;
+            }
 
-          $markdownFiles = $changedFiles | Where-Object { $_.ToLower().EndsWith('.md') }
+            let diffOutput = '';
+            try {
+              diffOutput = execSync(`git diff --name-only ${baseSha}..${headSha}`, { encoding: 'utf8' }).trim();
+            } catch (error) {
+              core.setFailed(`git diff failed: ${error.message}`);
+              return;
+            }
 
-          if (-not $markdownFiles) {
-              Write-Host '::notice::No Markdown files changed. Skipping image validation.'
-              exit 0
-          }
+            if (!diffOutput) {
+              core.info('No files changed; skipping image validation.');
+              return;
+            }
 
-          $brokenImages = @()
+            const candidateFiles = diffOutput.split(/\r?\n/)
+              .map((file) => file.trim())
+              .filter(Boolean)
+              .filter((file) => allowedExt.has(path.extname(file).toLowerCase()))
+              .filter((file) => fs.existsSync(path.join(workspace, file)));
 
-          function Add-Issue {
-              param(
-                  [string]$SourceFile,
-                  [int]$Line,
-                  [string]$Issue
-              )
+            if (!candidateFiles.length) {
+              core.info('No Markdown or HTML files changed; skipping image validation.');
+              return;
+            }
 
-              $script:brokenImages += [pscustomobject]@{
-                  SourceFile = $SourceFile
-                  Line       = $Line
-                  Issue      = $Issue
-              }
-          }
+            const markdownImagePattern = /!\[[^\]]*\]\(\s*(?<url>[^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
+            const htmlImagePattern = /<img[^>]+src=(?:"([^"]+)"|'([^']+)')/gi;
 
-          function Get-ImagesFromLine {
-              param([string]$Line)
+            const references = [];
 
-              $images = @()
-              $lineForParsing = [regex]::Replace($Line, '`[^`]*`', '')
+            for (const relativePath of candidateFiles) {
+              const absolutePath = path.join(workspace, relativePath);
+              const text = fs.readFileSync(absolutePath, 'utf8');
 
-              $imagePatterns = @(
-                  @{ Pattern = '!\[([^\]]*)\]\(([^)]+)\)'; Type = 'Markdown'; AltGroup = 1; UrlGroup = 2 },
-                  @{ Pattern = '<img\s+[^>]*>'; Type = 'HTML'; AltGroup = -1; UrlGroup = -1 }
-              )
+              const addReference = (url, index) => {
+                const line = lineFromIndex(text, index);
+                const repoPath = parseOrcaLink(url);
+                if (repoPath) {
+                  references.push({ filePath: relativePath, line, url, repoPath });
+                }
+              };
 
-              foreach ($pattern in $imagePatterns) {
-                  foreach ($match in [regex]::Matches($lineForParsing, $pattern.Pattern)) {
-                      $altText = ''
-                      $url = ''
-
-                      if ($pattern.Type -eq 'Markdown') {
-                          $altText = $match.Groups[$pattern.AltGroup].Value
-                          $url = $match.Groups[$pattern.UrlGroup].Value
-                      }
-                      else {
-                          $imgTag = $match.Value
-                          if ($imgTag -match "(?i)alt\s*=\s*[`"']([^`"']*)[`"']") { $altText = $matches[1] }
-                          if ($imgTag -match "(?i)src\s*=\s*[`"']([^`"']*)[`"']") { $url = $matches[1] }
-                      }
-
-                      $images += [pscustomobject]@{
-                          Match      = $match.Value
-                          Type       = $pattern.Type
-                          AltText    = $altText
-                          Url        = $url
-                          StartIndex = $match.Index
-                          Length     = $match.Length
-                      }
-                  }
+              markdownImagePattern.lastIndex = 0;
+              let match;
+              while ((match = markdownImagePattern.exec(text)) !== null) {
+                const url = match.groups ? match.groups.url : match[1];
+                if (url) {
+                  addReference(url.trim(), match.index);
+                }
               }
 
-              return $images
-          }
+              htmlImagePattern.lastIndex = 0;
+              while ((match = htmlImagePattern.exec(text)) !== null) {
+                const url = match[1] || match[2];
+                if (url) {
+                  addReference(url.trim(), match.index);
+                }
+              }
+            }
 
-          foreach ($relativeFile in $markdownFiles) {
-              $normalizedRelPath = $relativeFile -replace '\\', '/'
-              $nativeRelativePath = $relativeFile -replace '/', [System.IO.Path]::DirectorySeparatorChar
-              $fullPath = Join-Path $repoRoot $nativeRelativePath
+            if (!references.length) {
+              core.info('No OrcaSlicer image links found in updated files.');
+              return;
+            }
 
-              if (-not (Test-Path $fullPath)) {
-                  Write-Host "::warning::File not found (likely deleted): $relativeFile"
-                  continue
+            const cache = new Map();
+
+            const failures = [];
+            for (const reference of references) {
+              // eslint-disable-next-line no-await-in-loop
+              const exists = await repoPathExists(reference.repoPath, currentRepo, workspace, cache);
+              if (!exists) {
+                failures.push(reference);
+              }
+            }
+
+            if (failures.length) {
+              let message = '\nInvalid OrcaSlicer image references detected:';
+              for (const failure of failures) {
+                const rp = failure.repoPath;
+                message += `\n - ${failure.filePath}:${failure.line}: ${failure.url} -> missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
+              }
+              core.setFailed(message);
+              return;
+            }
+
+            core.info(`Validated ${references.length} OrcaSlicer image link(s). All exist.`);
+
+            function lineFromIndex(text, index) {
+              let line = 1;
+              for (let i = 0; i < index; i += 1) {
+                if (text.charCodeAt(i) === 10) {
+                  line += 1;
+                }
+              }
+              return line;
+            }
+
+            function parseOrcaLink(rawUrl) {
+              let parsed;
+              try {
+                parsed = new URL(rawUrl);
+              } catch (_) {
+                return null;
               }
 
-              $lines = Get-Content -Path $fullPath -Encoding UTF8
-              $inCodeFence = $false
-
-              for ($lineNumber = 0; $lineNumber -lt $lines.Count; $lineNumber++) {
-                  $line = $lines[$lineNumber]
-                  if ($line.TrimStart() -match '^(```|~~~)') {
-                      $inCodeFence = -not $inCodeFence
-                      continue
-                  }
-                  if ($inCodeFence) { continue }
-
-                  $imagesInLine = Get-ImagesFromLine $line
-
-                  foreach ($image in $imagesInLine) {
-                      $altText = ''
-                      $url = ''
-
-                      if ($null -ne $image.AltText) { $altText = $image.AltText.Trim() }
-                      if ($null -ne $image.Url) { $url = $image.Url.Trim() }
-
-                      if (-not $altText) {
-                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Missing alt text for image reference"
-                          continue
-                      }
-
-                      if (-not $url) {
-                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Missing URL for image reference"
-                          continue
-                      }
-
-                      $hasAllowedPrefix = $url.StartsWith($wikiPrefix) -or $url.StartsWith($mainRepoPrefix)
-                      $urlIssues = @()
-
-                      if (-not $hasAllowedPrefix) {
-                          $urlIssues += 'URL must point to the OrcaSlicer GitHub repositories'
-                      }
-
-                      if (-not $url.EndsWith($rawSuffix)) {
-                          $urlIssues += "URL must end with '$rawSuffix'"
-                      }
-
-                      if ($url -match '^https?://(?!github\.com/OrcaSlicer/)') {
-                          $urlIssues += 'External image hosts are not allowed'
-                      }
-
-                      if ($urlIssues.Count -gt 0) {
-                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] URL format issues: $([string]::Join('; ', $urlIssues))"
-                          continue
-                      }
-
-                      $prefixInUse = $url.StartsWith($wikiPrefix) ? $wikiPrefix : $mainRepoPrefix
-                      $relativeSegment = $url.Substring($prefixInUse.Length)
-                      $pathWithoutQuery = $relativeSegment.Substring(0, $relativeSegment.Length - $rawSuffix.Length)
-                      $altMatchesFile = $false
-
-                      if ($prefixInUse -eq $wikiPrefix) {
-                          $nativeImagePath = $pathWithoutQuery -replace '/', [System.IO.Path]::DirectorySeparatorChar
-                          $expectedImagePath = Join-Path $repoRoot $nativeImagePath
-
-                          if (-not (Test-Path $expectedImagePath)) {
-                              Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Image not found at path: $pathWithoutQuery"
-                              continue
-                          }
-
-                          $fileNameFromUrl = [System.IO.Path]::GetFileNameWithoutExtension($expectedImagePath)
-                          if ([string]::Equals($altText, $fileNameFromUrl, [System.StringComparison]::OrdinalIgnoreCase)) {
-                              $altMatchesFile = $true
-                          }
-                      }
-                      else {
-                          $fileNameFromUrl = [System.IO.Path]::GetFileNameWithoutExtension($pathWithoutQuery)
-                          if ([string]::Equals($altText, $fileNameFromUrl, [System.StringComparison]::OrdinalIgnoreCase)) {
-                              $altMatchesFile = $true
-                          }
-                      }
-
-                      if (-not $altMatchesFile) {
-                          Add-Issue $normalizedRelPath ($lineNumber + 1) "[$($image.Type)] Alt text '$altText' must match file name"
-                      }
-                  }
+              const scheme = parsed.protocol.replace(':', '').toLowerCase();
+              if (!['http', 'https'].includes(scheme)) {
+                return null;
               }
-          }
 
-          if ($brokenImages.Count -gt 0) {
-              Write-Host '::error::Image validation failed'
-              $brokenImages | Sort-Object SourceFile, Line | ForEach-Object {
-                  Write-Host "::error file=$($_.SourceFile),line=$($_.Line)::$($_.Issue)"
+              const hostname = parsed.hostname.toLowerCase();
+              if (!['github.com', 'raw.githubusercontent.com'].includes(hostname)) {
+                return null;
               }
-              exit 1
-          }
 
-          Write-Host '::notice::All image references look good.'
+              const parts = parsed.pathname.split('/').filter(Boolean);
+              if (!parts.length || parts[0].toLowerCase() !== ownerLower) {
+                return null;
+              }
 
+              if (hostname === 'github.com') {
+                if (parts.length < 5) {
+                  return null;
+                }
+                const repo = parts[1];
+                const blobOrRaw = parts[2];
+                const ref = decodeURIComponent(parts[3]);
+                if (!['blob', 'raw'].includes(blobOrRaw)) {
+                  return null;
+                }
+                const relPath = decodeURIComponent(parts.slice(4).join('/'));
+                return { repo, ref, path: relPath };
+              }
+
+              if (hostname === 'raw.githubusercontent.com') {
+                if (parts.length < 4) {
+                  return null;
+                }
+                const repo = parts[1];
+                const ref = decodeURIComponent(parts[2]);
+                const relPath = decodeURIComponent(parts.slice(3).join('/'));
+                return { repo, ref, path: relPath };
+              }
+
+              return null;
+            }
+
+            async function repoPathExists(repoPath, currentRepoName, root, cacheMap) {
+              const key = `${repoPath.repo}|${repoPath.ref}|${repoPath.path}`;
+              if (cacheMap.has(key)) {
+                return cacheMap.get(key);
+              }
+
+              let exists;
+              if (repoPath.repo === currentRepoName) {
+                const normalized = path.normalize(repoPath.path);
+                const candidate = path.join(root, normalized);
+                exists = candidate.startsWith(root) && fs.existsSync(candidate);
+              } else {
+                exists = await remoteExists(repoPath);
+              }
+
+              cacheMap.set(key, exists);
+              return exists;
+            }
+
+            async function remoteExists(repoPath) {
+              const encodedPath = repoPath.path
+                .split('/')
+                .filter(Boolean)
+                .map((segment) => encodeURIComponent(segment))
+                .join('/');
+              const ref = encodeURIComponent(repoPath.ref);
+              const url = `https://api.github.com/repos/${OWNER}/${repoPath.repo}/contents/${encodedPath}?ref=${ref}`;
+              const headers = {
+                Accept: 'application/vnd.github+json',
+                'User-Agent': 'orca-image-validator',
+                'X-GitHub-Api-Version': '2022-11-28',
+              };
+              if (process.env.GITHUB_TOKEN) {
+                headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+              }
+
+              const response = await fetch(url, { headers });
+              if (response.status === 200) {
+                return true;
+              }
+              if (response.status === 404) {
+                return false;
+              }
+              const body = await response.text();
+              throw new Error(`GitHub API ${response.status} for ${url}: ${body}`);
+            }
