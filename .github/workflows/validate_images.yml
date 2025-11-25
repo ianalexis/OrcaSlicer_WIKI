@@ -23,7 +23,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate OrcaSlicer image references
+      - id: validate_orca_images
+        name: Validate OrcaSlicer image references
         uses: actions/github-script@v7
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -40,6 +41,11 @@ jobs:
             const currentRepo = context.repo.repo;
             const workspace = process.cwd();
             const allowedExt = new Set(['.md', '.markdown', '.mdown', '.mkd', '.mkdn', '.mdx', '.html', '.htm']);
+            const reportPath = path.join(process.env.RUNNER_TEMP || workspace, 'orca_invalid_images.json');
+
+            fs.writeFileSync(reportPath, '[]');
+            core.exportVariable('INVALID_REPORT_PATH', reportPath);
+            core.exportVariable('INVALID_COUNT', '0');
 
             const baseSha = process.env.BASE_SHA;
             const headSha = process.env.HEAD_SHA;
@@ -128,20 +134,36 @@ jobs:
             }
 
             if (failures.length) {
-              let message = '\nInvalid OrcaSlicer image references detected:';
-              for (const failure of failures) {
+              const report = failures.map((failure) => {
                 const rp = failure.repoPath;
-                const lineMsg = failure.reason === 'missingRawQuery'
-                  ? `${failure.filePath}:${failure.line}: ${failure.url} -> missing required ?raw=true query parameter`
-                  : `${failure.filePath}:${failure.line}: ${failure.url} -> missing ${OWNER}/${rp.repo}:${rp.ref}/${rp.path}`;
-                core.error(lineMsg);
-                message += `\n - ${lineMsg}`;
-              }
-              core.setFailed(message);
+                const message = failure.reason === 'missingRawQuery'
+                  ? `${failure.filePath}:${failure.line}: missing required ?raw=true query parameter`
+                  : `${failure.filePath}:${failure.line}: ${OWNER}/${rp.repo}:${rp.ref}/${rp.path} not found`;
+                return {
+                  filePath: failure.filePath.replace(/\\/g, '/'),
+                  line: failure.line,
+                  url: failure.url,
+                  reason: failure.reason,
+                  message,
+                };
+              });
+
+              fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+              core.exportVariable('INVALID_COUNT', String(report.length));
+
+              core.summary
+                .addHeading('Invalid OrcaSlicer image references', 3)
+                .addTable([
+                  [{ data: 'Archivo', header: true }, { data: 'Línea', header: true }, { data: 'Detalle', header: true }],
+                  ...report.map((entry) => [entry.filePath, String(entry.line), entry.message]),
+                ])
+                .write();
+
+              core.info(`Found ${report.length} invalid OrcaSlicer image link(s).`);
               return;
             }
 
-            core.info(`Validated ${references.length} OrcaSlicer image link(s). All exist.`);
+            core.info(`Validated ${references.length} OrcaSlicer image link(s) across ${candidateFiles.length} file(s).`);
 
             function lineFromIndex(text, index) {
               let line = 1;
@@ -251,3 +273,61 @@ jobs:
               const body = await response.text();
               throw new Error(`GitHub API ${response.status} for ${url}: ${body}`);
             }
+
+      - name: Report invalid image references
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const invalidCount = Number(process.env.INVALID_COUNT || '0');
+            const reportPath = process.env.INVALID_REPORT_PATH;
+            if (!invalidCount || !reportPath) {
+              core.info('No invalid references to report.');
+              return;
+            }
+
+            const fs = require('fs');
+            let issues = [];
+            try {
+              if (fs.existsSync(reportPath)) {
+                issues = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+              }
+            } catch (error) {
+              core.warning(`Unable to read invalid reference report: ${error.message}`);
+            }
+
+            if (!Array.isArray(issues) || !issues.length) {
+              core.info('Invalid reference report empty; skipping annotations.');
+              return;
+            }
+
+            const pullNumber = context.payload.pull_request.number;
+            const headSha = process.env.HEAD_SHA || context.payload.pull_request.head.sha;
+
+            const reviewComments = issues
+              .filter((item) => Number.isInteger(item.line) && item.line > 0)
+              .slice(0, 50)
+              .map((item) => ({
+                path: item.filePath,
+                line: item.line,
+                side: 'RIGHT',
+                body: `⚠️ Imagen inválida: ${item.message}\n\nURL: ${item.url}`,
+              }));
+
+            if (reviewComments.length) {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pullNumber,
+                commit_id: headSha,
+                event: 'COMMENT',
+                comments: reviewComments,
+                body: 'Se detectaron referencias a imágenes de OrcaSlicer que no son válidas.',
+              });
+              core.info(`Posted ${reviewComments.length} review comment(s) on the PR.`);
+            } else {
+              core.warning('No valid line information available to annotate files.');
+            }
+
+            core.setFailed(`Detected ${issues.length} invalid OrcaSlicer image link(s).`);
