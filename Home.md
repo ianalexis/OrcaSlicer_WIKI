@@ -35,9 +35,6 @@ OrcaSlicer is a powerful open source slicer for FFF (FDM) 3D Printers. This wiki
 - [Adaptive Bed Mesh](adaptive-bed-mesh#test)
 - [Using different bed types in Orca](bed-types#multiple-bed-types)
 
-![custom-gcode_quality](https://github.com/OrcaSlicer/OrcaSlicer/blob/main/resources/images/custom-gcode_quality.svg?raw=true)
-![custom-quality](https://github.com/OrcaSlicer/OrcaSlicer/blob/main/resources/images/custom-quality.svg?raw=true)
-
 ## Material Settings
 
 ![filament-preset](https://github.com/OrcaSlicer/OrcaSlicer_WIKI/blob/main/images/GUI/filament-preset.png?raw=true)
