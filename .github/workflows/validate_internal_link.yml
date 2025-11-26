@@ -122,6 +122,11 @@ jobs:
                 continue;
               }
 
+              if (classification.type === 'invalidHashCount') {
+                failures.push(formatFailure(reference, 'invalidHashCount', classification.raw));
+                continue;
+              }
+
               if (classification.type === 'sameDocAnchor') {
                 if (!classification.anchorSlug) {
                   failures.push(formatFailure(reference, 'sameDocEmptyAnchor', reference.target));
@@ -182,11 +187,11 @@ jobs:
                 return { type: 'ignore' };
               }
 
-                if (trimmed.startsWith('#')) {
-                  if (trimmed.indexOf('#', 1) !== -1) {
-                    return { type: 'invalidHashCount', raw: trimmed };
-                  }
-                  const anchorRaw = trimmed.slice(1);
+              if (trimmed.startsWith('#')) {
+                if (trimmed.indexOf('#', 1) !== -1) {
+                  return { type: 'invalidHashCount', raw: trimmed };
+                }
+                const anchorRaw = trimmed.slice(1);
                 return {
                   type: 'sameDocAnchor',
                   anchorRaw,
@@ -198,12 +203,12 @@ jobs:
                 return { type: 'external' };
               }
 
-                const firstHash = trimmed.indexOf('#');
-                if (firstHash !== -1 && trimmed.indexOf('#', firstHash + 1) !== -1) {
-                  return { type: 'invalidHashCount', raw: trimmed };
-                }
+              const firstHash = trimmed.indexOf('#');
+              if (firstHash !== -1 && trimmed.indexOf('#', firstHash + 1) !== -1) {
+                return { type: 'invalidHashCount', raw: trimmed };
+              }
 
-                const hashIndex = firstHash;
+              const hashIndex = firstHash;
               if (hashIndex === -1) {
                 return {
                   type: 'docOnly',
@@ -297,11 +302,6 @@ jobs:
               for (const line of lines) {
                 const match = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
                 if (!match) {
-                  continue;
-                }
-
-                if (classification.type === 'invalidHashCount') {
-                  failures.push(formatFailure(reference, 'invalidHashCount', classification.raw));
                   continue;
                 }
                 let headingText = match[2].trim();
