@@ -29,10 +29,11 @@ OrcaSlicer is a powerful open source slicer for FFF (FDM) 3D Printers. This wiki
 ![printer](https://github.com/OrcaSlicer/OrcaSlicer/blob/main/resources/images/printer.svg?raw=true) Settings related to the 3D printer hardware and its configuration.
 
 - [Air filtration/Exhaust fan handling](air-filtration)
-- [Auxiliary fan handling](Auxiliary-fan)
-- [Chamber temperature control](chamber-temperature)
-- [Adaptive Bed Mesh](adaptive-bed-mesh)
-- [Using different bed types in Orca](bed-types)
+- [Auxiliary fan handling](auxiliary-fan#Usage)
+- [Auxiliary fan handling](auxiliary-fan#simple-option-indexes-only--fan0-fan2-fan3)
+- [Chamber temperature control](#chamber-temperature)
+- [Adaptive Bed Mesh](adaptive-bed-mesh#test)
+- [Using different bed types in Orca](bed-types#multiple-bed-types)
 
 ## Material Settings
 
