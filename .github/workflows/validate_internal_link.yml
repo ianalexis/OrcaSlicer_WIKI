@@ -393,5 +393,5 @@ jobs:
         if: env.ERROR_BLOCK != ''
         run: |
           echo 'Invalid markdown links:'
-          printf "```\n%s\n```\n" "${{ env.ERROR_BLOCK }}"
+          printf '```\n%s\n```\n' "${{ env.ERROR_BLOCK }}"
           exit 1
