@@ -38,6 +38,8 @@ jobs:
             const workspace = process.cwd();
             const workspaceRoot = path.resolve(workspace);
             const allowedExt = new Set(['.md', '.markdown', '.mdown', '.mkd', '.mkdn', '.mdx']);
+            const markdownNameIndex = new Map();
+            let markdownIndexReady = false;
 
             const baseSha = process.env.BASE_SHA;
             const headSha = process.env.HEAD_SHA;
@@ -142,12 +144,12 @@ jobs:
               if (classification.type === 'docOnly' || classification.type === 'docWithAnchor') {
                 const docResult = resolveDocumentPath(reference.filePath, classification.docPathRaw);
                 if (docResult.error) {
-                  failures.push(formatFailure(reference, docResult.error, classification.docPathRaw));
+                  failures.push(formatFailure(reference, docResult.error, docResult.detail || classification.docPathRaw));
                   continue;
                 }
 
                 if (!fs.existsSync(docResult.absolutePath)) {
-                  failures.push(formatFailure(reference, 'missingDocument', `${docResult.linkPath}.md`));
+                  failures.push(formatFailure(reference, 'missingDocument', docResult.relativePath || `${docResult.linkPath}.md`));
                   continue;
                 }
 
@@ -227,6 +229,7 @@ jobs:
                 relativePath: null,
                 absolutePath: null,
                 linkPath: null,
+                detail: rawPath,
               };
 
               if (!rawPath) {
@@ -247,36 +250,96 @@ jobs:
               }
 
               const sanitized = decoded.replace(/\\/g, '/');
-              const startsFromRoot = sanitized.startsWith('/');
-              const withoutRoot = startsFromRoot ? sanitized.slice(1) : sanitized;
-              const baseDir = startsFromRoot ? '' : path.dirname(fromFile);
-              const combined = startsFromRoot ? withoutRoot : path.join(baseDir, withoutRoot);
-              const normalized = path.normalize(combined);
-              const relativeCandidate = normalized.replace(/\\/g, '/');
-              if (!relativeCandidate || relativeCandidate === '.' || relativeCandidate === '..' || relativeCandidate.endsWith('/')) {
+              if (!sanitized || sanitized === '.' || sanitized === '..') {
                 result.error = 'missingDocName';
+                result.detail = rawPath;
                 return result;
               }
 
-              if (relativeCandidate.toLowerCase().endsWith('.md')) {
+              if (sanitized.includes('/') || sanitized.includes('\\')) {
+                result.error = 'pathNotAllowed';
+                result.detail = rawPath;
+                return result;
+              }
+
+              if (sanitized.toLowerCase().endsWith('.md')) {
                 result.error = 'extensionNotAllowed';
+                result.detail = rawPath;
                 return result;
               }
 
-              const relativeWithExt = `${relativeCandidate}.md`;
-              const absolutePath = path.join(workspaceRoot, relativeWithExt);
+              ensureMarkdownIndex();
+              const matches = findMarkdownDocuments(sanitized);
+              if (!matches.length) {
+                result.error = 'missingDocument';
+                result.detail = `${sanitized}.md`;
+                result.linkPath = sanitized;
+                return result;
+              }
+
+              if (matches.length > 1) {
+                result.error = 'ambiguousDocument';
+                result.detail = matches.slice(0, 5).join(', ');
+                result.linkPath = sanitized;
+                return result;
+              }
+
+              const relativePath = matches[0];
+              const absolutePath = path.join(workspaceRoot, relativePath);
               const normalizedAbsolute = path.normalize(absolutePath);
               const relativeToWorkspace = path.relative(workspaceRoot, normalizedAbsolute);
-
               if (relativeToWorkspace.startsWith('..') || path.isAbsolute(relativeToWorkspace)) {
                 result.error = 'outsideWorkspace';
+                result.detail = rawPath;
                 return result;
               }
 
-              result.relativePath = relativeWithExt.replace(/\\/g, '/');
+              result.relativePath = relativePath;
               result.absolutePath = normalizedAbsolute;
-              result.linkPath = relativeCandidate;
+              result.linkPath = sanitized;
+              result.detail = relativePath;
               return result;
+            }
+
+            function ensureMarkdownIndex() {
+              if (markdownIndexReady) {
+                return;
+              }
+              indexMarkdownFiles('');
+              markdownIndexReady = true;
+            }
+
+            function indexMarkdownFiles(relativeDir) {
+              const absoluteDir = relativeDir ? path.join(workspaceRoot, relativeDir) : workspaceRoot;
+              let entries;
+              try {
+                entries = fs.readdirSync(absoluteDir, { withFileTypes: true });
+              } catch (_) {
+                return;
+              }
+
+              for (const entry of entries) {
+                if (entry.name === '.git') {
+                  continue;
+                }
+                const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+                if (entry.isDirectory()) {
+                  indexMarkdownFiles(relativePath);
+                } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+                  const key = entry.name.slice(0, -3).toLowerCase();
+                  const normalized = relativePath.replace(/\\/g, '/');
+                  if (markdownNameIndex.has(key)) {
+                    markdownNameIndex.get(key).push(normalized);
+                  } else {
+                    markdownNameIndex.set(key, [normalized]);
+                  }
+                }
+              }
+            }
+
+            function findMarkdownDocuments(baseName) {
+              const key = baseName.toLowerCase();
+              return markdownNameIndex.get(key) || [];
             }
 
             function getAnchors(relativePath) {
@@ -380,12 +443,16 @@ jobs:
                   return `${reference.filePath} line ${reference.line}: document links cannot include query parameters (${details}).`;
                 case 'outsideWorkspace':
                   return `${reference.filePath} line ${reference.line}: document path "${details}" resolves outside the repository.`;
+                case 'pathNotAllowed':
+                  return `${reference.filePath} line ${reference.line}: document links must not include directories; use just the filename (got "${details}").`;
                 case 'extensionNotAllowed':
                   return `${reference.filePath} line ${reference.line}: link target "${details}" must omit the .md suffix.`;
                 case 'missingDocName':
                   return `${reference.filePath} line ${reference.line}: document link "${details}" must include a file name (without .md).`;
                 case 'missingDocument':
                   return `${reference.filePath} line ${reference.line}: linked document ${details} does not exist.`;
+                case 'ambiguousDocument':
+                  return `${reference.filePath} line ${reference.line}: document link matches multiple files (${details}).`;
                 case 'crossDocEmptyAnchor':
                   return `${reference.filePath} line ${reference.line}: link to ${details} must include a heading name after '#'.`;
                 case 'missingCrossDocAnchor':
