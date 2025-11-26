@@ -146,13 +146,8 @@ jobs:
                   continue;
                 }
 
-                if (!docResult.hasMarkdownExtension) {
-                  failures.push(formatFailure(reference, 'invalidExtension', docResult.displayPath));
-                  continue;
-                }
-
                 if (!fs.existsSync(docResult.absolutePath)) {
-                  failures.push(formatFailure(reference, 'missingDocument', docResult.displayPath));
+                  failures.push(formatFailure(reference, 'missingDocument', `${docResult.linkPath}.md`));
                   continue;
                 }
 
@@ -167,7 +162,7 @@ jobs:
 
                 const anchors = getAnchors(docResult.relativePath);
                 if (!anchors.has(classification.anchorSlug)) {
-                  failures.push(formatFailure(reference, 'missingCrossDocAnchor', `${docResult.displayPath}#${classification.anchorRaw}`));
+                  failures.push(formatFailure(reference, 'missingCrossDocAnchor', `${docResult.linkPath}#${classification.anchorRaw}`));
                 }
               }
             }
@@ -231,8 +226,7 @@ jobs:
                 error: null,
                 relativePath: null,
                 absolutePath: null,
-                displayPath: rawPath,
-                hasMarkdownExtension: false,
+                linkPath: null,
               };
 
               if (!rawPath) {
@@ -258,18 +252,30 @@ jobs:
               const baseDir = startsFromRoot ? '' : path.dirname(fromFile);
               const combined = startsFromRoot ? withoutRoot : path.join(baseDir, withoutRoot);
               const normalized = path.normalize(combined);
-              const absolutePath = path.join(workspaceRoot, normalized);
-              const relativeToWorkspace = path.relative(workspaceRoot, absolutePath);
+              const relativeCandidate = normalized.replace(/\\/g, '/');
+              if (!relativeCandidate || relativeCandidate === '.' || relativeCandidate === '..' || relativeCandidate.endsWith('/')) {
+                result.error = 'missingDocName';
+                return result;
+              }
+
+              if (relativeCandidate.toLowerCase().endsWith('.md')) {
+                result.error = 'extensionNotAllowed';
+                return result;
+              }
+
+              const relativeWithExt = `${relativeCandidate}.md`;
+              const absolutePath = path.join(workspaceRoot, relativeWithExt);
+              const normalizedAbsolute = path.normalize(absolutePath);
+              const relativeToWorkspace = path.relative(workspaceRoot, normalizedAbsolute);
 
               if (relativeToWorkspace.startsWith('..') || path.isAbsolute(relativeToWorkspace)) {
                 result.error = 'outsideWorkspace';
                 return result;
               }
 
-              result.relativePath = normalized.replace(/\\/g, '/');
-              result.absolutePath = absolutePath;
-              result.displayPath = result.relativePath;
-              result.hasMarkdownExtension = path.extname(result.relativePath).toLowerCase() === '.md';
+              result.relativePath = relativeWithExt.replace(/\\/g, '/');
+              result.absolutePath = normalizedAbsolute;
+              result.linkPath = relativeCandidate;
               return result;
             }
 
@@ -374,8 +380,10 @@ jobs:
                   return `${reference.filePath} line ${reference.line}: document links cannot include query parameters (${details}).`;
                 case 'outsideWorkspace':
                   return `${reference.filePath} line ${reference.line}: document path "${details}" resolves outside the repository.`;
-                case 'invalidExtension':
-                  return `${reference.filePath} line ${reference.line}: linked document must end with .md (${details}).`;
+                case 'extensionNotAllowed':
+                  return `${reference.filePath} line ${reference.line}: link target "${details}" must omit the .md suffix.`;
+                case 'missingDocName':
+                  return `${reference.filePath} line ${reference.line}: document link "${details}" must include a file name (without .md).`;
                 case 'missingDocument':
                   return `${reference.filePath} line ${reference.line}: linked document ${details} does not exist.`;
                 case 'crossDocEmptyAnchor':
