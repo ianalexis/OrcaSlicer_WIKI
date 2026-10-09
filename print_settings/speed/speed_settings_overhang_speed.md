@@ -53,5 +53,12 @@ This is the speed for various overhang degrees. Overhang degrees are expressed a
 
 ## Bridge speed
 
+[Mode](option_mode): `Advanced`.  
+[Variables](built_in_placeholders_variables): `bridge_speed`, `internal_bridge_speed`, `bridge_volumetric_flow`, `internal_bridge_volumetric_flow`.  
+[Type](option_type): `bridge_speed` (Float list), `internal_bridge_speed` (Float or Percentage list), `bridge_volumetric_flow` (Float or Percentage list), `internal_bridge_volumetric_flow` (Float or Percentage list).  
+[CLI Example](cli_mode#setting-overrides): `--bridge-speed=1` (`bridge_speed` shown; other variables above follow their own type).  
 Set speed for external and internal bridges.  
 It's usually recommended to increase internal bridge speed to reduce print time, while external bridge speed should be reduced to improve print quality.
+
+The external bridge speed is also limited by the filament's [Max external volumetric speed](material_volumetric_speed_limitation#max-external-volumetric-speed).  
+With [Volumetric speeds](speed_settings_other_layers_speed#volumetric-speeds) enabled, both are set as volumetric speeds instead, 25% for external and 40% for internal bridges by default.
